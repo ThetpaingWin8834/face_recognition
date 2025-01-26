@@ -79,7 +79,7 @@ class _FaceLivenessScreenState extends State<FaceLivenessScreen> {
       final faces = await _faceDetector.processImage(inputImage);
       if (faces.isNotEmpty) {
         final face = faces.first;
-        _updateInstruction(face);
+        _updateInstructionInverted(face);
       } else {
         setState(() {
           i++;
@@ -95,37 +95,149 @@ class _FaceLivenessScreenState extends State<FaceLivenessScreen> {
   }
 
   int i = 0;
+  void _updateInstructionInverted(Face face) {
+    final double? yaw = face.headEulerAngleY; // Yaw angle (head rotation)
+    final double? leftEyeOpen =
+        face.leftEyeOpenProbability; // Left eye open probability
+    final double? rightEyeOpen =
+        face.rightEyeOpenProbability; // Right eye open probability
 
-  void _updateInstruction(Face face) {
-    final double? yaw = face.headEulerAngleY;
-    final double? leftEyeOpen = face.leftEyeOpenProbability;
-    final double? rightEyeOpen = face.rightEyeOpenProbability;
+    // Invert yaw for front camera (mirrored preview)
+    final double? adjustedYaw = _cameraController!.description.lensDirection ==
+            CameraLensDirection.front
+        ? yaw != null
+            ? -yaw
+            : null // Invert yaw for front camera
+        : yaw; // Keep yaw as is for rear camera
 
-    if (_step == 0 && yaw != null && yaw.abs() < 10) {
-      setState(() {
-        _instruction = "Turn left";
-        _step = 1;
-      });
-    } else if (_step == 1 && yaw != null && yaw < -15) {
-      setState(() {
-        _instruction = "Turn right";
-        _step = 2;
-      });
-    } else if (_step == 2 && yaw != null && yaw > 15) {
-      setState(() {
-        _instruction = "Blink your eyes";
-        _step = 3;
-      });
-    } else if (_step == 3 &&
-        leftEyeOpen != null &&
-        rightEyeOpen != null &&
-        leftEyeOpen < 0.4 &&
-        rightEyeOpen < 0.4) {
-      setState(() {
-        _instruction = "Success!";
-        _isSuccess = true;
-        _step = 4;
-      });
+    // Step 0: Check if the face is straight
+    if (_step == 0) {
+      if (adjustedYaw != null && adjustedYaw.abs() < 10) {
+        // Face is straight
+        setState(() {
+          _instruction = "Face verified. Turn your head to the left.";
+          _step = 1; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please look straight.";
+        });
+      }
+    }
+    // Step 1: Wait for the user to turn their head to the left
+    else if (_step == 1) {
+      if (adjustedYaw != null && adjustedYaw < -15) {
+        // Head is turned to the left
+        setState(() {
+          _instruction = "Great! Now turn your head to the right.";
+          _step = 2; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please turn your head to the left.";
+        });
+      }
+    }
+    // Step 2: Wait for the user to turn their head to the right
+    else if (_step == 2) {
+      if (adjustedYaw != null && adjustedYaw > 15) {
+        // Head is turned to the right
+        setState(() {
+          _instruction = "Perfect! Now blink your eyes.";
+          _step = 3; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please turn your head to the right.";
+        });
+      }
+    }
+    // Step 3: Wait for the user to blink
+    else if (_step == 3) {
+      if (leftEyeOpen != null &&
+          rightEyeOpen != null &&
+          leftEyeOpen < 0.4 &&
+          rightEyeOpen < 0.4) {
+        // Both eyes are closed (blinking)
+        setState(() {
+          _instruction = "Success! Verification complete.";
+          _isSuccess = true;
+          _step = 4; // Final step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please blink your eyes.";
+        });
+      }
+    }
+  }
+
+  void _updateInstructionNonInverted(Face face) {
+    final double? yaw = face.headEulerAngleY; // Yaw angle (head rotation)
+    final double? leftEyeOpen =
+        face.leftEyeOpenProbability; // Left eye open probability
+    final double? rightEyeOpen =
+        face.rightEyeOpenProbability; // Right eye open probability
+
+    // Step 0: Check if the face is straight
+    if (_step == 0) {
+      if (yaw != null && yaw.abs() < 10) {
+        // Face is straight
+        setState(() {
+          _instruction = "Face verified. Turn your head to the left.";
+          _step = 1; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please look straight.";
+        });
+      }
+    }
+    // Step 1: Wait for the user to turn their head to the left
+    else if (_step == 1) {
+      if (yaw != null && yaw < -15) {
+        // Head is turned to the left
+        setState(() {
+          _instruction = "Great! Now turn your head to the right.";
+          _step = 2; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please turn your head to the left.";
+        });
+      }
+    }
+    // Step 2: Wait for the user to turn their head to the right
+    else if (_step == 2) {
+      if (yaw != null && yaw > 15) {
+        // Head is turned to the right
+        setState(() {
+          _instruction = "Perfect! Now blink your eyes.";
+          _step = 3; // Move to the next step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please turn your head to the right.";
+        });
+      }
+    }
+    // Step 3: Wait for the user to blink
+    else if (_step == 3) {
+      if (leftEyeOpen != null &&
+          rightEyeOpen != null &&
+          leftEyeOpen < 0.4 &&
+          rightEyeOpen < 0.4) {
+        // Both eyes are closed (blinking)
+        setState(() {
+          _instruction = "Success! Verification complete.";
+          _isSuccess = true;
+          _step = 4; // Final step
+        });
+      } else {
+        setState(() {
+          _instruction = "Please blink your eyes.";
+        });
+      }
     }
   }
 
@@ -162,6 +274,7 @@ class _FaceLivenessScreenState extends State<FaceLivenessScreen> {
     }
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: Colors.blueGrey,
         title: Text(
           "TPW'S Face Liveness Detection :3",
           style: TextStyle(fontSize: 15),
@@ -181,34 +294,20 @@ class _FaceLivenessScreenState extends State<FaceLivenessScreen> {
               left: 0,
               child: CameraPreview(_cameraController!),
             ),
-            if (!_isSuccess)
-              Container(
-                width: double.infinity,
-                color: Colors.black.withOpacity(0.5),
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  _instruction,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white),
-                ),
+            Container(
+              width: double.infinity,
+              color: Colors.black.withOpacity(0.5),
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                _instruction,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: _isSuccess ? Colors.green : Colors.white),
               ),
-            if (_isSuccess)
-              Container(
-                width: double.infinity,
-                color: Colors.black.withOpacity(0.5),
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  "Verification Successful!",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green),
-                ),
-              ),
+            ),
+
             // if (_isSuccess)
             //   Padding(
             //     padding: const EdgeInsets.all(16.0),
