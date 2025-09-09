@@ -361,7 +361,9 @@ class _FaceLivenessScreenState extends State<FaceLivenessScreen> {
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
-        format: InputImageFormat.nv21,
+        format: Platform.isIOS
+            ? InputImageFormat.bgra8888
+            : InputImageFormat.nv21,
         bytesPerRow: plane.bytesPerRow,
       ),
     );
