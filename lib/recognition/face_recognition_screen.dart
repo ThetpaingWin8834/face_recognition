@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 class FaceRecognitionScreen extends StatefulWidget {
   const FaceRecognitionScreen({super.key});
@@ -20,6 +21,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   }
 
   void initialize() async {
+    await loadCacheImg();
     final cameras = await availableCameras();
     final cameraDesc = cameras.firstWhere(
       (e) => e.lensDirection == CameraLensDirection.front,
@@ -34,12 +36,18 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     await cameraController!.initialize();
     setState(() {});
   }
-  
+
+  Future<void> loadCacheImg() async {
+    final dir = await getTemporaryDirectory();
+    print(dir.absolute.path);
+    print(dir.path);
+    print(dir.uri);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Recognition')),
+      appBar: AppBar(title: Text('Recognition'), actions: []),
       body: cameraController == null
           ? Center(child: CircularProgressIndicator.adaptive())
           : SizedBox.expand(
