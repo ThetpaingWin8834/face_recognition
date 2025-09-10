@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:rxdart/rxdart.dart';
 
 class FaceRecognitionScreen extends StatefulWidget {
   const FaceRecognitionScreen({super.key});
@@ -14,10 +16,20 @@ class FaceRecognitionScreen extends StatefulWidget {
 
 class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   CameraController? cameraController;
+  File? cacheImage;
+  final imageStream = BehaviorSubject<CameraImage>();
+  bool isProcessing = false;
   @override
   void initState() {
     super.initState();
     initialize();
+  }
+
+  @override
+  void dispose() {
+    cameraController?.dispose();
+    imageStream.close();
+    super.dispose();
   }
 
   void initialize() async {
@@ -34,20 +46,65 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
           : ImageFormatGroup.nv21,
     );
     await cameraController!.initialize();
+    cameraController!.startImageStream((image) {
+      imageStream.add(image);
+    });
     setState(() {});
+    imageStream.throttleTime(Duration(milliseconds: 300)).listen(processImage);
+  }
+
+  void processImage(CameraImage image) async {
+    if (isProcessing) return;
+    
   }
 
   Future<void> loadCacheImg() async {
     final dir = await getTemporaryDirectory();
-    print(dir.absolute.path);
-    print(dir.path);
-    print(dir.uri);
+    final path = '${dir.absolute.path}/temp.png';
+    final file = File(path);
+
+    setState(() {
+      cacheImage = file;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Recognition'), actions: []),
+      appBar: AppBar(
+        title: Text('Recognition'),
+        actions: [
+          if (cacheImage != null)
+            CircleAvatar(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(100),
+                child: Image.file(
+                  cacheImage!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return SizedBox.shrink();
+                  },
+                ),
+              ),
+            ),
+          SizedBox(width: 24),
+
+          IconButton(
+            onPressed: () async {
+              final file = await ImagePicker().pickImage(
+                source: ImageSource.camera,
+              );
+              if (file != null) {
+                setState(() {
+                  cacheImage = File(file.path);
+                });
+              }
+            },
+            icon: Icon(Icons.add_a_photo),
+          ),
+          SizedBox(width: 24),
+        ],
+      ),
       body: cameraController == null
           ? Center(child: CircularProgressIndicator.adaptive())
           : SizedBox.expand(
