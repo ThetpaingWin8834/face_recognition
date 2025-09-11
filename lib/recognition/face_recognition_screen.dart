@@ -1,13 +1,16 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:tensorflow_face_verification/tensorflow_face_verification.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
 
 class FaceRecognitionScreen extends StatefulWidget {
   const FaceRecognitionScreen({super.key});
@@ -21,6 +24,16 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   File? cacheImage;
   final imageStream = BehaviorSubject<CameraImage>();
   bool isProcessing = false;
+  Interpreter? interpreter;
+  final faceDetector = FaceDetector(
+    options: FaceDetectorOptions(
+      enableClassification: true,
+      enableTracking: false,
+      enableContours: false,
+      performanceMode: FaceDetectorMode.accurate,
+      enableLandmarks: false,
+    ),
+  );
   @override
   void initState() {
     super.initState();
@@ -30,6 +43,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   @override
   void dispose() {
     cameraController?.dispose();
+    faceDetector.close();
     imageStream.close();
     super.dispose();
   }
@@ -51,6 +65,8 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
             ? ImageFormatGroup.bgra8888
             : ImageFormatGroup.nv21,
       );
+      interpreter = await Interpreter.fromAsset('facenet.tflite');
+
       await cameraController!.initialize();
       cameraController!.startImageStream((image) {
         imageStream.add(image);
@@ -69,7 +85,62 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     isProcessing = true;
     final convertedImg = cameraImageToJpeg(image);
     // FaceVerification.instance.verifySamePerson(input1, input2)
-  
+  }
+
+  Future<List<double>?> getEmbedding(CameraImage image) async {
+    if (interpreter == null) return null;
+    final inputImage = _inputImageFromCameraImage(image);
+    if (inputImage == null) {
+      return null;
+    }
+    final faces = await faceDetector.processImage(inputImage);
+
+    if (faces.isEmpty) {
+      print('No face detected.');
+      return null;
+    }
+
+    final face = faces.first;
+    final img.Image? originalImage = img.decodeImage(
+      imageFile.readAsBytesSync(),
+    );
+
+    if (originalImage == null) return null;
+
+    final croppedImage = img.copyCrop(
+      originalImage,
+      x: face.boundingBox.left.toInt(),
+      y: face.boundingBox.top.toInt(),
+      width: face.boundingBox.width.toInt(),
+      height: face.boundingBox.height.toInt(),
+    );
+
+    final resizedImage = img.copyResize(croppedImage, width: 112, height: 112);
+    final input = _imageToByteListFloat32(resizedImage);
+
+    final output = List<double>.filled(192, 0).reshape([1, 192]);
+    interpreter!.run(input, output);
+    return output.first.cast<double>();
+  }
+
+  Float32List _imageToByteListFloat32(img.Image image) {
+    final inputSize = 112;
+    final float32List = Float32List(inputSize * inputSize * 3);
+    final buffer = float32List.buffer;
+    final ByteData byteData = ByteData.view(buffer);
+    int pixelIndex = 0;
+    for (var i = 0; i < inputSize; i++) {
+      for (var j = 0; j < inputSize; j++) {
+        final pixel = image.getPixel(j, i);
+        byteData.setFloat32(pixelIndex * 4, (pixel.r / 255.0));
+        pixelIndex++;
+        byteData.setFloat32(pixelIndex * 4, (pixel.g / 255.0));
+        pixelIndex++;
+        byteData.setFloat32(pixelIndex * 4, (pixel.b / 255.0));
+        pixelIndex++;
+      }
+    }
+    return float32List;
   }
 
   Uint8List cameraImageToJpeg(CameraImage image, {int quality = 90}) {
@@ -137,6 +208,47 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     setState(() {
       cacheImage = file;
     });
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    final camera = cameraController!.description;
+    final sensorOrientation = camera.sensorOrientation;
+
+    InputImageRotation? rotation;
+    if (Platform.isIOS) {
+      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    } else if (Platform.isAndroid) {
+      var rotationCompensation =
+          {
+            DeviceOrientation.portraitUp: 0,
+            DeviceOrientation.landscapeLeft: 90,
+          }[cameraController!.value.deviceOrientation] ??
+          0;
+
+      if (camera.lensDirection == CameraLensDirection.front) {
+        rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
+      } else {
+        rotationCompensation =
+            (sensorOrientation - rotationCompensation + 360) % 360;
+      }
+      rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
+    }
+
+    if (rotation == null) return null;
+    // final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    final plane = image.planes.first;
+
+    return InputImage.fromBytes(
+      bytes: plane.bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: Platform.isIOS
+            ? InputImageFormat.bgra8888
+            : InputImageFormat.nv21,
+        bytesPerRow: plane.bytesPerRow,
+      ),
+    );
   }
 
   @override
