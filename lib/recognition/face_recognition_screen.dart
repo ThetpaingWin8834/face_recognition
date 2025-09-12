@@ -104,13 +104,12 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     // }
     final newEmbeding = await getEmbedding(image);
     if (newEmbeding == null) {
-      printLog('new embed null');
       isProcessing = false;
 
       return;
     }
-    // final similarity = cosineSimilarity(existingEmbeding!, newEmbeding!);
-    // printLog(similarity);
+    final similarity = cosineSimilarity(existingEmbeding!, newEmbeding!);
+    printLog(similarity);
     isProcessing = false;
 
     // final convertedImg = cameraImageToJpeg(image);
@@ -119,26 +118,27 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
 
   Future<List<double>?> getEmbedFromFile(File file) async {
     try {
-      printLog('laoding cache embed ${interpreter == null}');
-      if (interpreter == null) return null;
+      // printLog('laoding cache embed ${interpreter == null}');
+      // if (interpreter == null) return null;
 
-      printLog(file.path);
-      // final bytes =await file.readAsBytes();
-      final bytes = await normalizedBytes(file);
-      final image = img.decodeImage(bytes)!;
-      final inputImage = InputImage.fromBytes(
-        bytes: bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: InputImageRotation.rotation0deg,
-          format: InputImageFormat.bgra8888, // or nv21 if needed
-          bytesPerRow: image.width * 4,
-        ),
-      );
-      printLog(inputImage.type);
-      printLog(inputImage.bytes!.length);
+      // printLog(file.path);
+      // // final bytes =await file.readAsBytes();
+      // final bytes = await file.readAsBytes();
 
-      return await _processImage(inputImage);
+      // final image = img.decodeImage(bytes)!;
+      // final inputImage = InputImage.fromBytes(
+      //   bytes: bytes,
+      //   metadata: InputImageMetadata(
+      //     size: Size(image.width.toDouble(), image.height.toDouble()),
+      //     rotation: InputImageRotation.rotation0deg,
+      //     format: InputImageFormat.bgra8888, // or nv21 if needed
+      //     bytesPerRow: image.width * 4,
+      //   ),
+      // );
+      // printLog(inputImage.type);
+      // printLog(inputImage.bytes!.length);
+
+      // return await _processImage(inputImage);
     } catch (e, s) {
       printLog(e, s: s);
       return null;
@@ -146,10 +146,14 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   }
 
   Future<Uint8List> normalizedBytes(File file) async {
-    final bytes = file.readAsBytesSync();
+    final bytes = await file.readAsBytes();
     final image = img.decodeImage(bytes)!;
     final exif = await readExifFromBytes(bytes);
-    final tag = exif['orientation'];
+    final tag = exif['Orientation'];
+
+    // for (var entry in exif.entries) {
+    //   print(entry.key);
+    // }
     printLog(tag);
     img.Image oriented = image;
     if (tag != null) {
@@ -327,7 +331,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     final path = '${dir.absolute.path}/temp.png';
     final file = File(path);
     existingEmbeding = await getEmbedFromFile(file);
-    printLog('loaed cache ${existingEmbeding == null}');
+
     setState(() {
       cacheImage = file;
     });
