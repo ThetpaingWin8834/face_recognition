@@ -1,7 +1,10 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:exif/exif.dart';
+import 'package:face_recognition/helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -24,6 +27,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   File? cacheImage;
   final imageStream = BehaviorSubject<CameraImage>();
   bool isProcessing = false;
+  List<double>? existingEmbeding;
   Interpreter? interpreter;
   final faceDetector = FaceDetector(
     options: FaceDetectorOptions(
@@ -50,10 +54,15 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
 
   void initialize() async {
     try {
-      await loadCacheImg();
-      await FaceVerification.init(
-        modelPath: 'assets/tf_models/mobilefacenet.tflite',
+      // await FaceVerification.init(
+      //   modelPath: 'assets/tf_models/mobilefacenet.tflite',
+      // );
+      // final buffer = await getBuffer('assets/tf_models/mobilefacenet.tflite');
+      interpreter = await Interpreter.fromAsset(
+        'assets/tf_models/mobilefacenet.tflite',
       );
+      await loadCacheImg();
+
       final cameras = await availableCameras();
       final cameraDesc = cameras.firstWhere(
         (e) => e.lensDirection == CameraLensDirection.front,
@@ -65,7 +74,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
             ? ImageFormatGroup.bgra8888
             : ImageFormatGroup.nv21,
       );
-      interpreter = await Interpreter.fromAsset('facenet.tflite');
 
       await cameraController!.initialize();
       cameraController!.startImageStream((image) {
@@ -76,34 +84,103 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
           .throttleTime(Duration(milliseconds: 300))
           .listen(processImage);
     } catch (e) {
-      print(e);
+      printLog(e);
     }
+  }
+
+  Future<Uint8List> getBuffer(String filePath) async {
+    final rawAssetFile = await rootBundle.load(filePath);
+    final rawBytes = rawAssetFile.buffer.asUint8List();
+    return rawBytes;
   }
 
   void processImage(CameraImage image) async {
     if (isProcessing) return;
     isProcessing = true;
-    final convertedImg = cameraImageToJpeg(image);
+    printLog('processing');
+    // if (existingEmbeding == null) {
+    //   isProcessing = false;
+    //   return;
+    // }
+    final newEmbeding = await getEmbedding(image);
+    if (newEmbeding == null) {
+      printLog('new embed null');
+      isProcessing = false;
+
+      return;
+    }
+    // final similarity = cosineSimilarity(existingEmbeding!, newEmbeding!);
+    // printLog(similarity);
+    isProcessing = false;
+
+    // final convertedImg = cameraImageToJpeg(image);
     // FaceVerification.instance.verifySamePerson(input1, input2)
   }
 
-  Future<List<double>?> getEmbedding(CameraImage image) async {
-    if (interpreter == null) return null;
-    final inputImage = _inputImageFromCameraImage(image);
-    if (inputImage == null) {
+  Future<List<double>?> getEmbedFromFile(File file) async {
+    try {
+      printLog('laoding cache embed ${interpreter == null}');
+      if (interpreter == null) return null;
+
+      printLog(file.path);
+      // final bytes =await file.readAsBytes();
+      final bytes = await normalizedBytes(file);
+      final image = img.decodeImage(bytes)!;
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: InputImageRotation.rotation0deg,
+          format: InputImageFormat.bgra8888, // or nv21 if needed
+          bytesPerRow: image.width * 4,
+        ),
+      );
+      printLog(inputImage.type);
+      printLog(inputImage.bytes!.length);
+
+      return await _processImage(inputImage);
+    } catch (e, s) {
+      printLog(e, s: s);
       return null;
     }
-    final faces = await faceDetector.processImage(inputImage);
+  }
+
+  Future<Uint8List> normalizedBytes(File file) async {
+    final bytes = file.readAsBytesSync();
+    final image = img.decodeImage(bytes)!;
+    final exif = await readExifFromBytes(bytes);
+    final tag = exif['orientation'];
+    printLog(tag);
+    img.Image oriented = image;
+    if (tag != null) {
+      switch (tag.tag) {
+        case 3:
+          oriented = img.copyRotate(image, angle: 180);
+          break;
+        case 6:
+          oriented = img.copyRotate(image, angle: 90);
+          break;
+        case 8:
+          oriented = img.copyRotate(image, angle: -90);
+          break;
+      }
+    }
+
+    return Uint8List.fromList(img.encodeJpg(oriented));
+  }
+
+  Future<List<double>?> _processImage(InputImage image) async {
+    final faces = await faceDetector.processImage(image);
 
     if (faces.isEmpty) {
-      print('No face detected.');
+      printLog('No face detected.');
       return null;
+    } else {
+      // printLog('detected faces ${faces.length}');
     }
 
     final face = faces.first;
-    final img.Image? originalImage = img.decodeImage(
-      imageFile.readAsBytesSync(),
-    );
+    final img.Image? originalImage = img.decodeImage(image.bytes!);
 
     if (originalImage == null) return null;
 
@@ -121,6 +198,44 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     final output = List<double>.filled(192, 0).reshape([1, 192]);
     interpreter!.run(input, output);
     return output.first.cast<double>();
+  }
+
+  Future<List<double>?> getEmbedding(CameraImage image) async {
+    if (interpreter == null) return null;
+
+    final inputImage = _inputImageFromCameraImage(image);
+    if (inputImage == null) {
+      return null;
+    }
+    return await _processImage(inputImage);
+  }
+
+  static double cosineSimilarity(
+    List<double> embedding1,
+    List<double> embedding2,
+  ) {
+    if (embedding1.length != embedding2.length) {
+      throw Exception('Embeddings must have the same length.');
+    }
+
+    double dotProduct = 0.0;
+    double magnitude1 = 0.0;
+    double magnitude2 = 0.0;
+
+    for (int i = 0; i < embedding1.length; i++) {
+      dotProduct += embedding1[i] * embedding2[i];
+      magnitude1 += embedding1[i] * embedding1[i];
+      magnitude2 += embedding2[i] * embedding2[i];
+    }
+
+    magnitude1 = sqrt(magnitude1);
+    magnitude2 = sqrt(magnitude2);
+
+    if (magnitude1 == 0.0 || magnitude2 == 0.0) {
+      return 0.0;
+    }
+
+    return dotProduct / (magnitude1 * magnitude2);
   }
 
   Float32List _imageToByteListFloat32(img.Image image) {
@@ -200,11 +315,19 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     return Uint8List.fromList(img.encodeJpg(convertedImage, quality: quality));
   }
 
+  Future<void> saveCache(File file) async {
+    final dir = await getTemporaryDirectory();
+    // final path = '${dir.absolute.path}/temp.png';
+
+    // await file.copy(path);
+  }
+
   Future<void> loadCacheImg() async {
     final dir = await getTemporaryDirectory();
     final path = '${dir.absolute.path}/temp.png';
     final file = File(path);
-
+    existingEmbeding = await getEmbedFromFile(file);
+    printLog('loaed cache ${existingEmbeding == null}');
     setState(() {
       cacheImage = file;
     });
@@ -277,11 +400,19 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
               final file = await ImagePicker().pickImage(
                 source: ImageSource.camera,
               );
-              if (file != null) {
-                setState(() {
-                  cacheImage = File(file.path);
-                });
+              if (file == null) {
+                return;
               }
+              cacheImage = File(file.path);
+              final dir = await getTemporaryDirectory();
+              final path = '${dir.absolute.path}/temp.png';
+              file.saveTo(path);
+
+              existingEmbeding = await getEmbedFromFile(cacheImage!);
+              if (existingEmbeding == null) {
+                return;
+              }
+              setState(() {});
             },
             icon: Icon(Icons.add_a_photo),
           ),
