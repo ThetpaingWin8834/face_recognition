@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:exif/exif.dart';
+import 'package:face_recognition/exif_helpers.dart';
 import 'package:face_recognition/helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -98,19 +99,27 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     if (isProcessing) return;
     isProcessing = true;
     printLog('processing');
+    await Future.delayed(Duration(seconds: 2));
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.absolute.path}/temp.png';
+    final file = File(path);
+    existingEmbeding = await getEmbedFromFile(file);
+    printLog(existingEmbeding == null);
+    isProcessing = false;
+
     // if (existingEmbeding == null) {
     //   isProcessing = false;
     //   return;
     // }
-    final newEmbeding = await getEmbedding(image);
-    if (newEmbeding == null) {
-      isProcessing = false;
+    // final newEmbeding = await getEmbedding(image);
+    // if (newEmbeding == null) {
+    //   isProcessing = false;
 
-      return;
-    }
-    final similarity = cosineSimilarity(existingEmbeding!, newEmbeding!);
-    printLog(similarity);
-    isProcessing = false;
+    //   return;
+    // }
+    // final similarity = cosineSimilarity(existingEmbeding!, newEmbeding);
+    // printLog(similarity);
+    // isProcessing = false;
 
     // final convertedImg = cameraImageToJpeg(image);
     // FaceVerification.instance.verifySamePerson(input1, input2)
@@ -119,30 +128,76 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Future<List<double>?> getEmbedFromFile(File file) async {
     try {
       // printLog('laoding cache embed ${interpreter == null}');
-      // if (interpreter == null) return null;
+      if (interpreter == null) return null;
 
-      // printLog(file.path);
-      // // final bytes =await file.readAsBytes();
-      // final bytes = await file.readAsBytes();
+      printLog(file.path);
+      // final bytes =await file.readAsBytes();
+      final bytes = await file.readAsBytes();
 
-      // final image = img.decodeImage(bytes)!;
-      // final inputImage = InputImage.fromBytes(
-      //   bytes: bytes,
-      //   metadata: InputImageMetadata(
-      //     size: Size(image.width.toDouble(), image.height.toDouble()),
-      //     rotation: InputImageRotation.rotation0deg,
-      //     format: InputImageFormat.bgra8888, // or nv21 if needed
-      //     bytesPerRow: image.width * 4,
-      //   ),
-      // );
-      // printLog(inputImage.type);
-      // printLog(inputImage.bytes!.length);
+      final image = img.decodeImage(bytes)!;
+      final data = await readExifFromBytes(bytes);
+      final orientation = data['Image Orientation']?.values.firstAsInt() ?? 1;
 
-      // return await _processImage(inputImage);
+      final rotated = () {
+        switch (orientation) {
+          case 3: // 180
+            return img.copyRotate(image, angle: 180);
+          case 6: // 90 CW
+            return img.copyRotate(image, angle: 90);
+          case 8: // 270 CW
+            return img.copyRotate(image, angle: -90);
+          default: // 1 (normal)
+            return image;
+        }
+      }();
+      final decode = img.encodeJpg(rotated);
+
+      final inputImage = InputImage.fromBytes(
+        bytes: decode,
+        metadata: InputImageMetadata(
+          size: Size(rotated.width.toDouble(), rotated.height.toDouble()),
+          rotation: InputImageRotation.rotation0deg,
+          format: InputImageFormat.bgra8888, // or nv21 if needed
+          bytesPerRow: rotated.width * 4,
+        ),
+      );
+
+      return await _processImage(inputImage);
     } catch (e, s) {
       printLog(e, s: s);
       return null;
     }
+  }
+
+  void printExifTags(Map<int, img.IfdValue> rawExif) {
+    printLog('=== EXIF TAGS FOUND ===');
+
+    rawExif.forEach((tagId, value) {
+      final tagName = ExifTags.getTagName(tagId);
+      final category = ExifTags.getTagCategory(tagId);
+
+      if (tagName != null) {
+        printLog(
+          '0x${tagId.toRadixString(16).toUpperCase().padLeft(4, '0')} '
+          '[$category] $tagName: $value',
+        );
+      } else {
+        printLog(
+          '0x${tagId.toRadixString(16).toUpperCase().padLeft(4, '0')} '
+          '[Unknown]: $value',
+        );
+      }
+    });
+  }
+
+  // Process and display EXIF data
+  void displayExifInfo(Map<int, dynamic> rawExif) {
+    final processed = ExifTagProcessor.processExifData(rawExif);
+
+    printLog('=== PROCESSED EXIF DATA ===');
+    processed.forEach((key, value) {
+      printLog('$key: $value');
+    });
   }
 
   Future<Uint8List> normalizedBytes(File file) async {
@@ -197,11 +252,11 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     );
 
     final resizedImage = img.copyResize(croppedImage, width: 112, height: 112);
-    final input = _imageToByteListFloat32(resizedImage);
+    // final input = _imageToByteListFloat32(resizedImage);
 
     final output = List<double>.filled(192, 0).reshape([1, 192]);
-    interpreter!.run(input, output);
-    return output.first.cast<double>();
+    // interpreter!.run(input, output);
+    // return output.first.cast<double>();
   }
 
   Future<List<double>?> getEmbedding(CameraImage image) async {
