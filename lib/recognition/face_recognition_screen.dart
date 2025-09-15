@@ -33,10 +33,10 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   final faceDetector = FaceDetector(
     options: FaceDetectorOptions(
       enableClassification: true,
-      enableTracking: false,
-      enableContours: false,
-      performanceMode: FaceDetectorMode.fast,
-      enableLandmarks: false,
+      enableTracking: true,
+      enableContours: true,
+      performanceMode: FaceDetectorMode.accurate,
+      enableLandmarks: true,
     ),
   );
   @override
@@ -49,6 +49,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   void dispose() {
     cameraController?.dispose();
     faceDetector.close();
+
     imageStream.close();
     super.dispose();
   }
@@ -129,66 +130,66 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       if (interpreter == null) return null;
 
       // 1. Read & decode
-      final bytes = await file.readAsBytes();
-      final image = img.decodeImage(bytes)!;
+      // final bytes = await file.readAsBytes();
+      // final image = img.decodeImage(bytes)!;
 
-      // 2. Correct orientation using EXIF
-      final exif = await readExifFromBytes(bytes);
-      final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
-      img.Image rotated;
-      switch (orientation) {
-        case 3:
-          rotated = img.copyRotate(image, angle: 180);
-          break;
-        case 6:
-          rotated = img.copyRotate(image, angle: 90);
-          break;
-        case 8:
-          rotated = img.copyRotate(image, angle: -90);
-          break;
-        default:
-          rotated = image;
-      }
+      // // // 2. Correct orientation using EXIF
+      // final exif = await readExifFromBytes(bytes);
+      // final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
+      // img.Image rotated;
+      // switch (orientation) {
+      //   case 3:
+      //     rotated = img.copyRotate(image, angle: 180);
+      //     break;
+      //   case 6:
+      //     rotated = img.copyRotate(image, angle: 90);
+      //     break;
+      //   case 8:
+      //     rotated = img.copyRotate(image, angle: -90);
+      //     break;
+      //   default:
+      //     rotated = image;
+      // }
 
-      // 3. Run MLKit face detection
-      final inputImage = InputImage.fromBytes(
-        bytes: rotated.getBytes(), // raw RGBA
-        metadata: InputImageMetadata(
-          size: Size(rotated.width.toDouble(), rotated.height.toDouble()),
-          rotation: InputImageRotation.rotation0deg, // already rotated
-          format: InputImageFormat.bgra8888,
-          bytesPerRow: rotated.width * 4,
-        ),
-      );
+      // // // 3. Run MLKit face detection
+      // final inputImage = InputImage.fromBytes(
+      //   bytes: rotated.getBytes(), // raw RGBA
+      //   metadata: InputImageMetadata(
+      //     size: Size(rotated.width.toDouble(), rotated.height.toDouble()),
+      //     rotation: InputImageRotation.rotation0deg, // already rotated
+      //     format: InputImageFormat.bgra8888,
+      //     bytesPerRow: rotated.width * 4,
+      //   ),
+      // );
 
-      final faces = await faceDetector.processImage(inputImage);
-      if (faces.isEmpty) {
-        printLog("No face detected");
-        return null;
-      }
-      final face = faces.first;
+      // final faces = await faceDetector.processImage(inputImage);
+      // if (faces.isEmpty) {
+      //   printLog("No face detected");
+      //   return null;
+      // }
+      // final face = faces.first;
 
-      // 4. Crop face
-      final cropRect = face.boundingBox;
-      final cropped = img.copyCrop(
-        rotated,
-        x: cropRect.left.toInt().clamp(0, rotated.width - 1),
-        y: cropRect.top.toInt().clamp(0, rotated.height - 1),
-        width: cropRect.width.toInt().clamp(1, rotated.width),
-        height: cropRect.height.toInt().clamp(1, rotated.height),
-      );
+      // // 4. Crop face
+      // final cropRect = face.boundingBox;
+      // final cropped = img.copyCrop(
+      //   rotated,
+      //   x: cropRect.left.toInt().clamp(0, rotated.width - 1),
+      //   y: cropRect.top.toInt().clamp(0, rotated.height - 1),
+      //   width: cropRect.width.toInt().clamp(1, rotated.width),
+      //   height: cropRect.height.toInt().clamp(1, rotated.height),
+      // );
 
-      // 5. Resize to 112×112
-      final resized = img.copyResize(cropped, width: 112, height: 112);
+      // // 5. Resize to 112×112
+      // final resized = img.copyResize(cropped, width: 112, height: 112);
 
-      // 6. Convert to Float32 input
-      final input = _imageToByteListFloat32(resized);
+      // // 6. Convert to Float32 input
+      // final input = _imageToByteListFloat32(resized);
 
-      // 7. Allocate output & run inference safely
-      final outputBuffer = List.generate(1, (_) => List.filled(192, 0.0));
-      interpreter!.run(input.reshape([1, 112, 112, 3]), outputBuffer);
+      // // 7. Allocate output & run inference safely
+      // final outputBuffer = List.generate(1, (_) => List.filled(192, 0.0));
+      // interpreter!.run(input.reshape([1, 112, 112, 3]), outputBuffer);
 
-      return List<double>.from(outputBuffer.first);
+      // return List<double>.from(outputBuffer.first);
     } catch (e, s) {
       printLog(e, s: s);
       return null;
@@ -255,16 +256,16 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   }
 
   Future<List<double>?> _processImage(InputImage image) async {
-    final faces = await faceDetector.processImage(image);
+    // final faces = await faceDetector.processImage(image);
 
-    if (faces.isEmpty) {
-      printLog('No face detected.');
-      return null;
-    } else {
-      // printLog('detected faces ${faces.length}');
-    }
+    // if (faces.isEmpty) {
+    //   printLog('No face detected.');
+    //   return null;
+    // } else {
+    //   // printLog('detected faces ${faces.length}');
+    // }
 
-    final face = faces.first;
+    // final face = faces.first;
     // final img.Image? originalImage = img.decodeImage(image.bytes!);
 
     // if (originalImage == null) return null;
@@ -464,15 +465,41 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
         title: Text('Recognition'),
         actions: [
           if (cacheImage != null)
-            CircleAvatar(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(100),
-                child: Image.file(
-                  cacheImage!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return SizedBox.shrink();
+            GestureDetector(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (context) {
+                    return Stack(
+                      children: [
+                        Image.file(
+                          cacheImage!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return SizedBox.shrink();
+                          },
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                          icon: Icon(Icons.close),
+                        ),
+                      ],
+                    );
                   },
+                );
+              },
+              child: CircleAvatar(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(100),
+                  child: Image.file(
+                    cacheImage!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return SizedBox.shrink();
+                    },
+                  ),
                 ),
               ),
             ),
@@ -486,16 +513,23 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
               if (file == null) {
                 return;
               }
-              cacheImage = File(file.path);
-              final dir = await getTemporaryDirectory();
-              final path = '${dir.absolute.path}/temp.png';
-              file.saveTo(path);
-
-              existingEmbeding = await getEmbedFromFile(cacheImage!);
-              if (existingEmbeding == null) {
-                return;
+              final croppedImg = await processPickedImage(file);
+              if (croppedImg != null) {
+                setState(() {
+                  cacheImage = croppedImg;
+                });
               }
-              setState(() {});
+
+              // cacheImage = File(file.path);
+              // final dir = await getTemporaryDirectory();
+              // final path = '${dir.absolute.path}/temp.png';
+              // file.saveTo(path);
+
+              // // existingEmbeding = await getEmbedFromFile(cacheImage!);
+              // // if (existingEmbeding == null) {
+              // //   return;
+              // // }
+              // setState(() {});
             },
             icon: Icon(Icons.add_a_photo),
           ),
@@ -508,8 +542,8 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
               child: FittedBox(
                 fit: BoxFit.cover,
                 child: SizedBox(
-                  width: cameraController!.value.previewSize!.height,
-                  height: cameraController!.value.previewSize!.width,
+                  width: cameraController!.value.previewSize?.height,
+                  height: cameraController!.value.previewSize?.width,
                   child: AspectRatio(
                     aspectRatio: _isLandscape()
                         ? cameraController!.value.aspectRatio
@@ -527,6 +561,96 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ].contains(_getApplicableOrientation());
+  }
+
+  /// Processes an [XFile] from ImagePicker, rotates to 0°, detects face, crops it,
+  /// saves the cropped face to a temporary file, and returns the saved [File].
+  Future<File?> processPickedImage(XFile pickedFile) async {
+    try {
+      // // 1. Read & decode
+      // final bytes = await pickedFile.readAsBytes();
+      // final image = img.decodeImage(bytes);
+      // if (image == null) return null;
+
+      // // 2. Correct orientation to 0°
+      // final exif = await readExifFromBytes(bytes);
+      // final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
+      // img.Image rotated;
+      // switch (orientation) {
+      //   case 3:
+      //     rotated = img.copyRotate(image, angle: 180);
+      //     break;
+      //   case 6:
+      //     rotated = img.copyRotate(image, angle: 90);
+      //     break;
+      //   case 8:
+      //     rotated = img.copyRotate(image, angle: -90);
+      //     break;
+      //   default:
+      //     rotated = image;
+      // }
+
+      // // 3. Face detection
+      // final inputImage = InputImage.fromBytes(
+      //   bytes: rotated.getBytes(),
+      //   metadata: InputImageMetadata(
+      //     size: Size(rotated.width.toDouble(), rotated.height.toDouble()),
+      //     rotation: InputImageRotation.rotation0deg,
+      //     format: InputImageFormat.bgra8888,
+      //     bytesPerRow: rotated.width * 4,
+      //   ),
+      // );
+      final fileBytes = await pickedFile.readAsBytes();
+      final decoded = img.decodeImage(fileBytes);
+      final baked = img.bakeOrientation(decoded!);
+      final newBytes = img.encodeJpg(baked);
+      final tempDir = await getTemporaryDirectory();
+      final savedPath = '${tempDir.path}/face_cropped.jpg';
+      final savedFile = File(savedPath);
+      await savedFile.writeAsBytes(newBytes);
+      final inputImage = InputImage.fromFile(savedFile);
+      printLog(inputImage.metadata);
+      final faces = await faceDetector.processImage(inputImage);
+      if (faces.isEmpty) {
+        printLog("No face detected");
+        return null;
+      }
+      final face = faces.first;
+      final cropRect = face.boundingBox;
+      printLog(cropRect);
+      final x = cropRect.left.toInt().clamp(0, decoded.width - 1);
+      final y = cropRect.top.toInt().clamp(0, decoded.height - 1);
+      final width = cropRect.width.toInt().clamp(1, decoded.width - x);
+      final height = cropRect.height.toInt().clamp(1, decoded.height - y);
+      final croppedFace = img.copyCrop(
+        decoded,
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+      );
+      final resizedFace = img.copyResize(croppedFace, width: 112, height: 112);
+
+      final croppedFile = File(savedPath);
+      await croppedFile.writeAsBytes(img.encodeJpg(resizedFace));
+      return croppedFile;
+      // Clamp crop rect to image boundaries
+      // final x = cropRect.left.toInt().clamp(0, rotated.width - 1);
+      // final y = cropRect.top.toInt().clamp(0, rotated.height - 1);
+      // final w = cropRect.width.toInt().clamp(1, rotated.width - x);
+      // final h = cropRect.height.toInt().clamp(1, rotated.height - y);
+      // final cropped = img.copyCrop(rotated, x: x, y: y, width: w, height: h);
+
+      // // 4. Save cropped face to temp file
+      // final tempDir = await getTemporaryDirectory();
+      // final croppedPath = '${tempDir.path}/cropped_face.jpg';
+      // final croppedFile = File(croppedPath);
+      // await croppedFile.writeAsBytes(img.encodeJpg(cropped));
+      // return croppedFile;
+    } catch (e, s) {
+      printLog(e, s: s);
+      return null;
+    }
   }
 
   DeviceOrientation _getApplicableOrientation() {
