@@ -32,7 +32,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Interpreter? interpreter;
   final faceDetector = FaceDetector(
     options: FaceDetectorOptions(
-      enableClassification: false,
+      enableClassification: true,
       enableTracking: false,
       enableContours: false,
       performanceMode: FaceDetectorMode.fast,
