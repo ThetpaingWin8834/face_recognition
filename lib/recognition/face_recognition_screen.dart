@@ -146,17 +146,46 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       return;
     }
     final face = faces.first;
-    final cropImg = convertCameraImageToImage(image);
-    if (cropImg == null) {
-      isProcessing = false;
+    final imgObject = convertCameraImageToImage(image);
+    final rect = face.boundingBox;
 
-      printLog('Cropping failed');
+    // Clamp values to avoid going outside the image
+    final x = rect.left.toInt().clamp(0, imgObject.width - 1);
+    final y = rect.top.toInt().clamp(0, imgObject.height - 1);
+    final w = rect.width.toInt().clamp(1, imgObject.width - x);
+    final h = rect.height.toInt().clamp(1, imgObject.height - y);
+
+    final cropImg = img.copyCrop(imgObject, x: x, y: y, width: w, height: h);
+    final newEmbedding = await getFaceEmbedding(cropImg);
+    if (existingEmbeding == null || newEmbedding == null) {
       return;
     }
+    final similarity = cosineDistance(existingEmbeding!, newEmbedding);
+    printLog(similarity);
+
     test.value = cropImg;
     isProcessing = false;
     // final jpegBytes = cameraImageToJpeg(cameraImage);
     // final image = img.decodeImage(jpegBytes)!;
+  }
+
+  List<double> normalizeEmbedding(List<double> embedding) {
+    double norm = sqrt(embedding.fold(0.0, (sum, e) => sum + e * e));
+    if (norm == 0) return embedding; // avoid div by zero
+    return embedding.map((e) => e / norm).toList();
+  }
+
+  double cosineDistance(List<double> e1, List<double> e2) {
+    if (e1.length != e2.length) {
+      throw Exception('Embeddings must have the same length.');
+    }
+
+    // Assumes both embeddings are already normalized
+    double dotProduct = 0.0;
+    for (int i = 0; i < e1.length; i++) {
+      dotProduct += e1[i] * e2[i];
+    }
+    return 1.0 - dotProduct; // since magnitudes = 1
   }
 
   img.Image convertCameraImageToImage(CameraImage image) {
@@ -171,16 +200,39 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
 
   img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
     final plane = cameraImage.planes[0];
-    var iosBytesOffset = 28;
-    return img.Image.fromBytes(
-      width: cameraImage.width,
-      height: cameraImage.height,
-      bytes: plane.bytes.buffer,
-      rowStride: plane.bytesPerRow,
-      bytesOffset: iosBytesOffset,
-      order: img.ChannelOrder.bgra,
-    );
+    final width = cameraImage.width;
+    final height = cameraImage.height;
+    final bytes = plane.bytes;
+
+    final image = img.Image(width: width, height: height);
+
+    int byteIndex = 0;
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final b = bytes[byteIndex];
+        final g = bytes[byteIndex + 1];
+        final r = bytes[byteIndex + 2];
+        final a = bytes[byteIndex + 3];
+        image.setPixelRgba(x, y, r, g, b, a);
+        byteIndex += 4;
+      }
+    }
+
+    return image;
   }
+
+  // img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
+  //   final plane = cameraImage.planes[0];
+  //   var iosBytesOffset = 28;
+  //   return img.Image.fromBytes(
+  //     width: cameraImage.width,
+  //     height: cameraImage.height,
+  //     bytes: plane.bytes.buffer,
+  //     rowStride: plane.bytesPerRow,
+  //     // bytesOffset: iosBytesOffset,
+  //     order: img.ChannelOrder.bgra,
+  //   );
+  // }
 
   img.Image _convertNV21(CameraImage image) {
     final width = image.width.toInt();
@@ -336,61 +388,59 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     });
   }
 
-  Future<Uint8List> normalizedBytes(File file) async {
-    final bytes = await file.readAsBytes();
-    final image = img.decodeImage(bytes)!;
-    final exif = await readExifFromBytes(bytes);
-    final tag = exif['Orientation'];
+  // double cosineDistance(List<double> e1, List<double> e2) {
+  //   if (e1.length != e2.length) {
+  //     throw Exception('Embeddings must have the same length.');
+  //   }
 
-    // for (var entry in exif.entries) {
-    //   print(entry.key);
-    // }
-    printLog(tag);
-    img.Image oriented = image;
-    if (tag != null) {
-      switch (tag.tag) {
-        case 3:
-          oriented = img.copyRotate(image, angle: 180);
-          break;
-        case 6:
-          oriented = img.copyRotate(image, angle: 90);
-          break;
-        case 8:
-          oriented = img.copyRotate(image, angle: -90);
-          break;
-      }
-    }
+  //   double dotProduct = 0.0;
+  //   double magnitude1 = 0.0;
+  //   double magnitude2 = 0.0;
 
-    return Uint8List.fromList(img.encodeJpg(oriented));
-  }
+  //   for (int i = 0; i < e1.length; i++) {
+  //     dotProduct += e1[i] * e2[i];
+  //     magnitude1 += e1[i] * e1[i];
+  //     magnitude2 += e2[i] * e2[i];
+  //   }
 
-  static double cosineSimilarity(
-    List<double> embedding1,
-    List<double> embedding2,
-  ) {
-    if (embedding1.length != embedding2.length) {
-      throw Exception('Embeddings must have the same length.');
-    }
+  //   magnitude1 = sqrt(magnitude1);
+  //   magnitude2 = sqrt(magnitude2);
 
-    double dotProduct = 0.0;
-    double magnitude1 = 0.0;
-    double magnitude2 = 0.0;
+  //   if (magnitude1 == 0.0 || magnitude2 == 0.0) {
+  //     return double.infinity; // invalid embedding
+  //   }
 
-    for (int i = 0; i < embedding1.length; i++) {
-      dotProduct += embedding1[i] * embedding2[i];
-      magnitude1 += embedding1[i] * embedding1[i];
-      magnitude2 += embedding2[i] * embedding2[i];
-    }
+  //   final cosineSim = dotProduct / (magnitude1 * magnitude2);
+  //   return 1.0 - cosineSim; // distance
+  // }
 
-    magnitude1 = sqrt(magnitude1);
-    magnitude2 = sqrt(magnitude2);
+  //  double cosineSimilarity(
+  //   List<double> embedding1,
+  //   List<double> embedding2,
+  // ) {
+  //   if (embedding1.length != embedding2.length) {
+  //     throw Exception('Embeddings must have the same length.');
+  //   }
 
-    if (magnitude1 == 0.0 || magnitude2 == 0.0) {
-      return 0.0;
-    }
+  //   double dotProduct = 0.0;
+  //   double magnitude1 = 0.0;
+  //   double magnitude2 = 0.0;
 
-    return dotProduct / (magnitude1 * magnitude2);
-  }
+  //   for (int i = 0; i < embedding1.length; i++) {
+  //     dotProduct += embedding1[i] * embedding2[i];
+  //     magnitude1 += embedding1[i] * embedding1[i];
+  //     magnitude2 += embedding2[i] * embedding2[i];
+  //   }
+
+  //   magnitude1 = sqrt(magnitude1);
+  //   magnitude2 = sqrt(magnitude2);
+
+  //   if (magnitude1 == 0.0 || magnitude2 == 0.0) {
+  //     return 0.0;
+  //   }
+
+  //   return dotProduct / (magnitude1 * magnitude2);
+  // }
 
   Float32List _imageToByteListFloat32(img.Image image) {
     final inputSize = 112;
