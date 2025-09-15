@@ -63,7 +63,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
         'assets/tf_models/mobilefacenet.tflite',
       );
       await loadCacheImg();
-
       final cameras = await availableCameras();
       final cameraDesc = cameras.firstWhere(
         (e) => e.lensDirection == CameraLensDirection.front,
@@ -127,42 +126,69 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
 
   Future<List<double>?> getEmbedFromFile(File file) async {
     try {
-      // printLog('laoding cache embed ${interpreter == null}');
       if (interpreter == null) return null;
 
-      printLog(file.path);
-      // final bytes =await file.readAsBytes();
+      // 1. Read & decode
       final bytes = await file.readAsBytes();
-
       final image = img.decodeImage(bytes)!;
-      final data = await readExifFromBytes(bytes);
-      final orientation = data['Image Orientation']?.values.firstAsInt() ?? 1;
 
-      final rotated = () {
-        switch (orientation) {
-          case 3: // 180
-            return img.copyRotate(image, angle: 180);
-          case 6: // 90 CW
-            return img.copyRotate(image, angle: 90);
-          case 8: // 270 CW
-            return img.copyRotate(image, angle: -90);
-          default: // 1 (normal)
-            return image;
-        }
-      }();
-      final decode = img.encodeJpg(rotated);
+      // 2. Correct orientation using EXIF
+      final exif = await readExifFromBytes(bytes);
+      final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
+      img.Image rotated;
+      switch (orientation) {
+        case 3:
+          rotated = img.copyRotate(image, angle: 180);
+          break;
+        case 6:
+          rotated = img.copyRotate(image, angle: 90);
+          break;
+        case 8:
+          rotated = img.copyRotate(image, angle: -90);
+          break;
+        default:
+          rotated = image;
+      }
 
+      // 3. Run MLKit face detection
       final inputImage = InputImage.fromBytes(
-        bytes: decode,
+        bytes: rotated.getBytes(), // raw RGBA
         metadata: InputImageMetadata(
           size: Size(rotated.width.toDouble(), rotated.height.toDouble()),
-          rotation: InputImageRotation.rotation0deg,
-          format: InputImageFormat.bgra8888, // or nv21 if needed
+          rotation: InputImageRotation.rotation0deg, // already rotated
+          format: InputImageFormat.bgra8888,
           bytesPerRow: rotated.width * 4,
         ),
       );
 
-      return await _processImage(inputImage);
+      final faces = await faceDetector.processImage(inputImage);
+      if (faces.isEmpty) {
+        printLog("No face detected");
+        return null;
+      }
+      final face = faces.first;
+
+      // 4. Crop face
+      final cropRect = face.boundingBox;
+      final cropped = img.copyCrop(
+        rotated,
+        x: cropRect.left.toInt().clamp(0, rotated.width - 1),
+        y: cropRect.top.toInt().clamp(0, rotated.height - 1),
+        width: cropRect.width.toInt().clamp(1, rotated.width),
+        height: cropRect.height.toInt().clamp(1, rotated.height),
+      );
+
+      // 5. Resize to 112×112
+      final resized = img.copyResize(cropped, width: 112, height: 112);
+
+      // 6. Convert to Float32 input
+      final input = _imageToByteListFloat32(resized);
+
+      // 7. Allocate output & run inference safely
+      final outputBuffer = List.generate(1, (_) => List.filled(192, 0.0));
+      interpreter!.run(input.reshape([1, 112, 112, 3]), outputBuffer);
+
+      return List<double>.from(outputBuffer.first);
     } catch (e, s) {
       printLog(e, s: s);
       return null;
@@ -377,7 +403,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Future<void> saveCache(File file) async {
     final dir = await getTemporaryDirectory();
     // final path = '${dir.absolute.path}/temp.png';
-
     // await file.copy(path);
   }
 
@@ -386,7 +411,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     final path = '${dir.absolute.path}/temp.png';
     final file = File(path);
     existingEmbeding = await getEmbedFromFile(file);
-
     setState(() {
       cacheImage = file;
     });
