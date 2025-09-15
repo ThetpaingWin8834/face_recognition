@@ -32,6 +32,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Interpreter? interpreter;
   String? cachedPath;
   final test = ValueNotifier<img.Image?>(null);
+  final similarityNotifier = ValueNotifier(1.0);
 
   Future<String> getCachedPath() async {
     if (cachedPath != null) {
@@ -161,6 +162,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       return;
     }
     final similarity = cosineDistance(existingEmbeding!, newEmbedding);
+    similarityNotifier.value = similarity;
     printLog(similarity);
 
     test.value = cropImg;
@@ -688,6 +690,21 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
                           errorBuilder: (context, error, stackTrace) {
                             return SizedBox.shrink();
                           },
+                        );
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 12,
+                    width: 70,
+                    height: 70,
+                    child: ValueListenableBuilder(
+                      valueListenable: similarityNotifier,
+                      builder: (context, value, child) {
+                        final isMatch = value < 0.3;
+                        return Container(
+                          color: isMatch ? Colors.green : Colors.red,
                         );
                       },
                     ),
