@@ -32,10 +32,10 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Interpreter? interpreter;
   final faceDetector = FaceDetector(
     options: FaceDetectorOptions(
-      enableClassification: true,
+      enableClassification: false,
       enableTracking: false,
       enableContours: false,
-      performanceMode: FaceDetectorMode.accurate,
+      performanceMode: FaceDetectorMode.fast,
       enableLandmarks: false,
     ),
   );
@@ -81,9 +81,9 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
         imageStream.add(image);
       });
       setState(() {});
-      imageStream
-          .throttleTime(Duration(milliseconds: 300))
-          .listen(processImage);
+      // imageStream
+      //     .throttleTime(Duration(milliseconds: 300))
+      //     .listen(processImage);
     } catch (e) {
       printLog(e);
     }
@@ -239,22 +239,22 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     }
 
     final face = faces.first;
-    final img.Image? originalImage = img.decodeImage(image.bytes!);
+    // final img.Image? originalImage = img.decodeImage(image.bytes!);
 
-    if (originalImage == null) return null;
+    // if (originalImage == null) return null;
 
-    final croppedImage = img.copyCrop(
-      originalImage,
-      x: face.boundingBox.left.toInt(),
-      y: face.boundingBox.top.toInt(),
-      width: face.boundingBox.width.toInt(),
-      height: face.boundingBox.height.toInt(),
-    );
+    // final croppedImage = img.copyCrop(
+    //   originalImage,
+    //   x: face.boundingBox.left.toInt(),
+    //   y: face.boundingBox.top.toInt(),
+    //   width: face.boundingBox.width.toInt(),
+    //   height: face.boundingBox.height.toInt(),
+    // );
 
-    final resizedImage = img.copyResize(croppedImage, width: 112, height: 112);
-    // final input = _imageToByteListFloat32(resizedImage);
+    // final resizedImage = img.copyResize(croppedImage, width: 112, height: 112);
+    // // final input = _imageToByteListFloat32(resizedImage);
 
-    final output = List<double>.filled(192, 0).reshape([1, 192]);
+    // final output = List<double>.filled(192, 0).reshape([1, 192]);
     // interpreter!.run(input, output);
     // return output.first.cast<double>();
   }
@@ -266,7 +266,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     if (inputImage == null) {
       return null;
     }
-    return await _processImage(inputImage);
+    // return await _processImage(inputImage);
   }
 
   static double cosineSimilarity(
