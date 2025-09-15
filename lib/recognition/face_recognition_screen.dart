@@ -30,6 +30,18 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   bool isProcessing = false;
   List<double>? existingEmbeding;
   Interpreter? interpreter;
+  String? cachedPath;
+  final test = ValueNotifier<img.Image?>(null);
+
+  Future<String> getCachedPath() async {
+    if (cachedPath != null) {
+      return cachedPath!;
+    }
+    final tempDir = await getTemporaryDirectory();
+    cachedPath = '${tempDir.path}/face_cropped.jpg';
+    return cachedPath!;
+  }
+
   final faceDetector = FaceDetector(
     options: FaceDetectorOptions(
       enableClassification: true,
@@ -49,7 +61,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   void dispose() {
     cameraController?.dispose();
     faceDetector.close();
-
+    interpreter?.close();
     imageStream.close();
     super.dispose();
   }
@@ -60,6 +72,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       //   modelPath: 'assets/tf_models/mobilefacenet.tflite',
       // );
       // final buffer = await getBuffer('assets/tf_models/mobilefacenet.tflite');
+
       interpreter = await Interpreter.fromAsset(
         'assets/tf_models/mobilefacenet.tflite',
       );
@@ -81,12 +94,33 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
         imageStream.add(image);
       });
       setState(() {});
-      // imageStream
-      //     .throttleTime(Duration(milliseconds: 300))
-      //     .listen(processImage);
+      imageStream
+          .throttleTime(Duration(milliseconds: 300))
+          .listen(processImage);
     } catch (e) {
       printLog(e);
     }
+  }
+
+  /// Converts an [img.Image] of a cropped face to a Float32List input and
+  /// runs the TFLite interpreter to get the embedding.
+  Future<List<double>?> getFaceEmbedding(img.Image faceImage) async {
+    if (interpreter == null) return null;
+
+    // 1. Resize to 112x112 (model input)
+    final inputImage = img.copyResize(faceImage, width: 112, height: 112);
+
+    // 2. Convert to Float32 normalized input
+    final input = _imageToByteListFloat32(inputImage); // your existing helper
+
+    // 3. Allocate output buffer (embedding size 192)
+    final outputBuffer = List.generate(1, (_) => List.filled(192, 0.0));
+
+    // 4. Run interpreter
+    interpreter!.run(input.reshape([1, 112, 112, 3]), outputBuffer);
+
+    // 5. Return embedding vector
+    return List<double>.from(outputBuffer.first);
   }
 
   Future<Uint8List> getBuffer(String filePath) async {
@@ -100,29 +134,104 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     isProcessing = true;
     printLog('processing');
     await Future.delayed(Duration(seconds: 2));
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.absolute.path}/temp.png';
-    final file = File(path);
-    existingEmbeding = await getEmbedFromFile(file);
-    printLog(existingEmbeding == null);
+    final inputImage = _inputImageFromCameraImage(image);
+    if (inputImage == null) {
+      return;
+    }
+    final faces = await faceDetector.processImage(inputImage);
+    if (faces.isEmpty) {
+      isProcessing = false;
+
+      printLog('No Face Detected');
+      return;
+    }
+    final face = faces.first;
+    final cropImg = convertCameraImageToImage(image);
+    if (cropImg == null) {
+      isProcessing = false;
+
+      printLog('Cropping failed');
+      return;
+    }
+    test.value = cropImg;
     isProcessing = false;
+    // final jpegBytes = cameraImageToJpeg(cameraImage);
+    // final image = img.decodeImage(jpegBytes)!;
+  }
 
-    // if (existingEmbeding == null) {
-    //   isProcessing = false;
-    //   return;
-    // }
-    // final newEmbeding = await getEmbedding(image);
-    // if (newEmbeding == null) {
-    //   isProcessing = false;
+  img.Image convertCameraImageToImage(CameraImage image) {
+    if (Platform.isAndroid) {
+      return _convertNV21(image);
+    } else if (Platform.isIOS) {
+      return _convertBGRA8888ToImage(image);
+    } else {
+      throw Exception('Unsupported');
+    }
+  }
 
-    //   return;
-    // }
-    // final similarity = cosineSimilarity(existingEmbeding!, newEmbeding);
-    // printLog(similarity);
-    // isProcessing = false;
+  img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
+    final plane = cameraImage.planes[0];
+    var iosBytesOffset = 28;
+    return img.Image.fromBytes(
+      width: cameraImage.width,
+      height: cameraImage.height,
+      bytes: plane.bytes.buffer,
+      rowStride: plane.bytesPerRow,
+      bytesOffset: iosBytesOffset,
+      order: img.ChannelOrder.bgra,
+    );
+  }
 
-    // final convertedImg = cameraImageToJpeg(image);
-    // FaceVerification.instance.verifySamePerson(input1, input2)
+  img.Image _convertNV21(CameraImage image) {
+    final width = image.width.toInt();
+    final height = image.height.toInt();
+
+    Uint8List yuv420sp = image.planes[0].bytes;
+
+    final outImg = img.Image(height: height, width: width);
+    final int frameSize = width * height;
+
+    for (int j = 0, yp = 0; j < height; j++) {
+      int uvp = frameSize + (j >> 1) * width, u = 0, v = 0;
+      for (int i = 0; i < width; i++, yp++) {
+        int y = (0xff & yuv420sp[yp]) - 16;
+        if (y < 0) y = 0;
+        if ((i & 1) == 0) {
+          v = (0xff & yuv420sp[uvp++]) - 128;
+          u = (0xff & yuv420sp[uvp++]) - 128;
+        }
+        int y1192 = 1192 * y;
+        int r = (y1192 + 1634 * v);
+        int g = (y1192 - 833 * v - 400 * u);
+        int b = (y1192 + 2066 * u);
+
+        if (r < 0) {
+          r = 0;
+        } else if (r > 262143) {
+          r = 262143;
+        }
+
+        if (g < 0) {
+          g = 0;
+        } else if (g > 262143) {
+          g = 262143;
+        }
+        if (b < 0) {
+          b = 0;
+        } else if (b > 262143) {
+          b = 262143;
+        }
+
+        outImg.setPixelRgb(
+          i,
+          j,
+          ((r << 6) & 0xff0000) >> 16,
+          ((g >> 2) & 0xff00) >> 8,
+          (b >> 10) & 0xff,
+        );
+      }
+    }
+    return outImg;
   }
 
   Future<List<double>?> getEmbedFromFile(File file) async {
@@ -255,47 +364,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     return Uint8List.fromList(img.encodeJpg(oriented));
   }
 
-  Future<List<double>?> _processImage(InputImage image) async {
-    // final faces = await faceDetector.processImage(image);
-
-    // if (faces.isEmpty) {
-    //   printLog('No face detected.');
-    //   return null;
-    // } else {
-    //   // printLog('detected faces ${faces.length}');
-    // }
-
-    // final face = faces.first;
-    // final img.Image? originalImage = img.decodeImage(image.bytes!);
-
-    // if (originalImage == null) return null;
-
-    // final croppedImage = img.copyCrop(
-    //   originalImage,
-    //   x: face.boundingBox.left.toInt(),
-    //   y: face.boundingBox.top.toInt(),
-    //   width: face.boundingBox.width.toInt(),
-    //   height: face.boundingBox.height.toInt(),
-    // );
-
-    // final resizedImage = img.copyResize(croppedImage, width: 112, height: 112);
-    // // final input = _imageToByteListFloat32(resizedImage);
-
-    // final output = List<double>.filled(192, 0).reshape([1, 192]);
-    // interpreter!.run(input, output);
-    // return output.first.cast<double>();
-  }
-
-  Future<List<double>?> getEmbedding(CameraImage image) async {
-    if (interpreter == null) return null;
-
-    final inputImage = _inputImageFromCameraImage(image);
-    if (inputImage == null) {
-      return null;
-    }
-    // return await _processImage(inputImage);
-  }
-
   static double cosineSimilarity(
     List<double> embedding1,
     List<double> embedding2,
@@ -327,20 +395,17 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Float32List _imageToByteListFloat32(img.Image image) {
     final inputSize = 112;
     final float32List = Float32List(inputSize * inputSize * 3);
-    final buffer = float32List.buffer;
-    final ByteData byteData = ByteData.view(buffer);
     int pixelIndex = 0;
+
     for (var i = 0; i < inputSize; i++) {
       for (var j = 0; j < inputSize; j++) {
         final pixel = image.getPixel(j, i);
-        byteData.setFloat32(pixelIndex * 4, (pixel.r / 255.0));
-        pixelIndex++;
-        byteData.setFloat32(pixelIndex * 4, (pixel.g / 255.0));
-        pixelIndex++;
-        byteData.setFloat32(pixelIndex * 4, (pixel.b / 255.0));
-        pixelIndex++;
+        float32List[pixelIndex++] = pixel.r / 255.0;
+        float32List[pixelIndex++] = pixel.g / 255.0;
+        float32List[pixelIndex++] = pixel.b / 255.0;
       }
     }
+
     return float32List;
   }
 
@@ -401,17 +466,17 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     return Uint8List.fromList(img.encodeJpg(convertedImage, quality: quality));
   }
 
-  Future<void> saveCache(File file) async {
-    final dir = await getTemporaryDirectory();
-    // final path = '${dir.absolute.path}/temp.png';
-    // await file.copy(path);
-  }
-
   Future<void> loadCacheImg() async {
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.absolute.path}/temp.png';
+    final path = await getCachedPath();
     final file = File(path);
-    existingEmbeding = await getEmbedFromFile(file);
+    // existingEmbeding = await getEmbedFromFile(file);
+    final decode = await img.decodeImageFile(file.path);
+    if (decode == null) {
+      printLog('decode failed');
+      return;
+    }
+    existingEmbeding = await getFaceEmbedding(decode);
+    printLog(existingEmbeding == null);
     setState(() {
       cacheImage = file;
     });
@@ -539,18 +604,45 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       body: cameraController == null
           ? Center(child: CircularProgressIndicator.adaptive())
           : SizedBox.expand(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: cameraController!.value.previewSize?.height,
-                  height: cameraController!.value.previewSize?.width,
-                  child: AspectRatio(
-                    aspectRatio: _isLandscape()
-                        ? cameraController!.value.aspectRatio
-                        : 1 / cameraController!.value.aspectRatio,
-                    child: CameraPreview(cameraController!),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: cameraController!.value.previewSize?.height,
+                      height: cameraController!.value.previewSize?.width,
+                      child: AspectRatio(
+                        aspectRatio: _isLandscape()
+                            ? cameraController!.value.aspectRatio
+                            : 1 / cameraController!.value.aspectRatio,
+                        child: CameraPreview(cameraController!),
+                      ),
+                    ),
                   ),
-                ),
+                  Positioned(
+                    left: 12,
+                    top: 12,
+                    width: 70,
+                    height: 70,
+                    child: ValueListenableBuilder(
+                      valueListenable: test,
+                      builder: (context, value, child) {
+                        if (value == null) {
+                          return SizedBox.shrink();
+                        }
+                        final bytes = img.encodeJpg(value);
+                        return Image.memory(
+                          bytes!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return SizedBox.shrink();
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
     );
@@ -563,8 +655,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     ].contains(_getApplicableOrientation());
   }
 
-  /// Processes an [XFile] from ImagePicker, rotates to 0°, detects face, crops it,
-  /// saves the cropped face to a temporary file, and returns the saved [File].
   Future<File?> processPickedImage(XFile pickedFile) async {
     try {
       // // 1. Read & decode
@@ -604,8 +694,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       final decoded = img.decodeImage(fileBytes);
       final baked = img.bakeOrientation(decoded!);
       final newBytes = img.encodeJpg(baked);
-      final tempDir = await getTemporaryDirectory();
-      final savedPath = '${tempDir.path}/face_cropped.jpg';
+      final savedPath = await getCachedPath();
       final savedFile = File(savedPath);
       await savedFile.writeAsBytes(newBytes);
       final inputImage = InputImage.fromFile(savedFile);
@@ -633,6 +722,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
 
       final croppedFile = File(savedPath);
       await croppedFile.writeAsBytes(img.encodeJpg(resizedFace));
+      printLog(resizedFace.data);
       return croppedFile;
       // Clamp crop rect to image boundaries
       // final x = cropRect.left.toInt().clamp(0, rotated.width - 1);
