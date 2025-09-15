@@ -131,44 +131,90 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   }
 
   void processImage(CameraImage image) async {
-    if (isProcessing) return;
-    isProcessing = true;
-    printLog('processing');
-    await Future.delayed(Duration(seconds: 2));
-    final inputImage = _inputImageFromCameraImage(image);
-    if (inputImage == null) {
-      return;
-    }
-    final faces = await faceDetector.processImage(inputImage);
-    if (faces.isEmpty) {
+    try {
+      if (isProcessing) return;
+      isProcessing = true;
+      printLog('processing');
+      await Future.delayed(Duration(seconds: 2));
+      final inputImage = _inputImageFromCameraImage(image);
+      if (inputImage == null) {
+        printLog('input img null');
+        return;
+      }
+      final faces = await faceDetector.processImage(inputImage);
+      if (faces.isEmpty) {
+        isProcessing = false;
+
+        printLog('No Face Detected');
+        return;
+      }
+      final face = faces.first;
+      final sensorOrientation = cameraController!.description.sensorOrientation;
+      final deviceOrientation = cameraController!.value.deviceOrientation;
+
+      int rotationDegrees =
+          (sensorOrientation -
+              _deviceRotationToDegrees(deviceOrientation) +
+              360) %
+          360;
+      printLog(rotationDegrees);
+      final convertedImg = convertCameraImageToImage(image);
+      final imgObject = _rotateImage(convertedImg, rotationDegrees);
+      final rect = face.boundingBox;
+
+      // Clamp values to avoid going outside the image
+      final x = rect.left.toInt().clamp(0, imgObject.width - 1);
+      final y = rect.top.toInt().clamp(0, imgObject.height - 1);
+      final w = rect.width.toInt().clamp(1, imgObject.width - x);
+      final h = rect.height.toInt().clamp(1, imgObject.height - y);
+
+      final cropImg = img.copyCrop(imgObject, x: x, y: y, width: w, height: h);
+      final newEmbedding = await getFaceEmbedding(cropImg);
+      if (existingEmbeding == null || newEmbedding == null) {
+        printLog('${existingEmbeding == null} || ${newEmbedding == null}');
+        return;
+      }
+      final similarity = cosineDistance(existingEmbeding!, newEmbedding);
+      similarityNotifier.value = similarity;
+      printLog(similarity);
+
+      test.value = imgObject;
       isProcessing = false;
-
-      printLog('No Face Detected');
-      return;
+    } catch (e) {
+      printLog(e);
+    } finally {
+      isProcessing = false;
     }
-    final face = faces.first;
-    final imgObject = convertCameraImageToImage(image);
-    final rect = face.boundingBox;
-
-    // Clamp values to avoid going outside the image
-    final x = rect.left.toInt().clamp(0, imgObject.width - 1);
-    final y = rect.top.toInt().clamp(0, imgObject.height - 1);
-    final w = rect.width.toInt().clamp(1, imgObject.width - x);
-    final h = rect.height.toInt().clamp(1, imgObject.height - y);
-
-    final cropImg = img.copyCrop(imgObject, x: x, y: y, width: w, height: h);
-    final newEmbedding = await getFaceEmbedding(cropImg);
-    if (existingEmbeding == null || newEmbedding == null) {
-      return;
-    }
-    final similarity = cosineDistance(existingEmbeding!, newEmbedding);
-    similarityNotifier.value = similarity;
-    printLog(similarity);
-
-    test.value = cropImg;
-    isProcessing = false;
     // final jpegBytes = cameraImageToJpeg(cameraImage);
     // final image = img.decodeImage(jpegBytes)!;
+  }
+
+  /// Converts DeviceOrientation to degrees (Android)
+  int _deviceRotationToDegrees(DeviceOrientation orientation) {
+    switch (orientation) {
+      case DeviceOrientation.portraitUp:
+        return 0;
+      case DeviceOrientation.landscapeLeft:
+        return 90;
+      case DeviceOrientation.portraitDown:
+        return 180;
+      case DeviceOrientation.landscapeRight:
+        return 270;
+    }
+  }
+
+  img.Image _rotateImage(img.Image src, int degrees) {
+    switch (degrees) {
+      case 90:
+        return img.copyRotate(src, angle: 90);
+      case 180:
+        return img.copyRotate(src, angle: 180);
+      case 270:
+        return img.copyRotate(src, angle: -90);
+      case 0:
+      default:
+        return src; // no rotation needed
+    }
   }
 
   List<double> normalizeEmbedding(List<double> embedding) {
@@ -221,6 +267,12 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     }
 
     return image;
+  }
+
+  Future printOrientiation(img.Image image) async {
+    final exif = await readExifFromBytes(image.buffer.asInt8List());
+    final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
+    printLog(orientation);
   }
 
   // img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
@@ -521,6 +573,10 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   Future<void> loadCacheImg() async {
     final path = await getCachedPath();
     final file = File(path);
+    final isFileExist = await file.exists();
+    if (!isFileExist) {
+      return;
+    }
     // existingEmbeding = await getEmbedFromFile(file);
     final decode = await img.decodeImageFile(file.path);
     if (decode == null) {
@@ -535,44 +591,98 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
   }
 
   InputImage? _inputImageFromCameraImage(CameraImage image) {
-    final camera = cameraController!.description;
-    final sensorOrientation = camera.sensorOrientation;
+    try {
+      final camera = cameraController!.description;
+      final sensorOrientation = camera.sensorOrientation;
 
-    InputImageRotation? rotation;
-    if (Platform.isIOS) {
-      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
-    } else if (Platform.isAndroid) {
-      var rotationCompensation =
-          {
-            DeviceOrientation.portraitUp: 0,
-            DeviceOrientation.landscapeLeft: 90,
-          }[cameraController!.value.deviceOrientation] ??
-          0;
+      InputImageRotation? rotation;
+      if (Platform.isIOS) {
+        rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+      } else if (Platform.isAndroid) {
+        var rotationCompensation =
+            {
+              DeviceOrientation.portraitUp: 0,
+              DeviceOrientation.landscapeLeft: 90,
+            }[cameraController!.value.deviceOrientation] ??
+            0;
 
-      if (camera.lensDirection == CameraLensDirection.front) {
-        rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
-      } else {
-        rotationCompensation =
-            (sensorOrientation - rotationCompensation + 360) % 360;
+        if (camera.lensDirection == CameraLensDirection.front) {
+          rotationCompensation =
+              (sensorOrientation + rotationCompensation) % 360;
+        } else {
+          rotationCompensation =
+              (sensorOrientation - rotationCompensation + 360) % 360;
+        }
+        rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
       }
-      rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
+
+      if (rotation == null) return null;
+      // final format = InputImageFormatValue.fromRawValue(image.format.raw);
+
+      Uint8List bytes;
+      InputImageFormat format;
+
+      if (Platform.isAndroid) {
+        bytes = image.planes.first.bytes;
+
+        // bytes = _concatenatePlanes(image.planes, image.width, image.height);
+        format = InputImageFormat.nv21;
+      } else {
+        bytes = image.planes.first.bytes;
+        format = InputImageFormat.bgra8888;
+      }
+
+      return InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Concatenates Y, U, and V planes into a single NV21 buffer without RangeError.
+  /// Handles rowStride and pixelStride for planes 1 and 2.
+  Uint8List _concatenatePlanes(List<Plane> planes, int width, int height) {
+    final int ySize = width * height;
+    final int uvSize = width * height ~/ 2;
+    final buffer = Uint8List(ySize + uvSize);
+
+    // Copy Y plane
+    final Plane yPlane = planes[0];
+    for (int row = 0; row < height; row++) {
+      final int srcOffset = row * yPlane.bytesPerRow;
+      final int dstOffset = row * width;
+      buffer.setRange(dstOffset, dstOffset + width, yPlane.bytes, srcOffset);
     }
 
-    if (rotation == null) return null;
-    // final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    final plane = image.planes.first;
-
-    return InputImage.fromBytes(
-      bytes: plane.bytes,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: Platform.isIOS
-            ? InputImageFormat.bgra8888
-            : InputImageFormat.nv21,
-        bytesPerRow: plane.bytesPerRow,
-      ),
-    );
+    // NV21 interleaved VU
+    final Plane uPlane = planes[1];
+    final Plane vPlane = planes[2];
+    final int uvRowStride = uPlane.bytesPerRow;
+    final int uvPixelStride = uPlane.bytesPerPixel ?? 1;
+    final int vuRowStride = vPlane.bytesPerRow;
+    final int vuPixelStride = vPlane.bytesPerPixel ?? 1;
+    int uvIndex = ySize;
+    for (int row = 0; row < height ~/ 2; row++) {
+      for (int col = 0; col < width ~/ 2; col++) {
+        int uIndex = row * uvRowStride + col * uvPixelStride;
+        int vIndex = row * vuRowStride + col * vuPixelStride;
+        // Defensive: clamp to buffer length to avoid RangeError.
+        int u = uIndex < uPlane.bytes.length ? uPlane.bytes[uIndex] : 128;
+        int v = vIndex < vPlane.bytes.length ? vPlane.bytes[vIndex] : 128;
+        if (uvIndex < buffer.length - 1) {
+          buffer[uvIndex++] = v;
+          buffer[uvIndex++] = u;
+        }
+      }
+    }
+    return buffer;
   }
 
   @override
