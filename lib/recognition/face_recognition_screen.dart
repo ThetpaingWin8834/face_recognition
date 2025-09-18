@@ -269,25 +269,6 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     return image;
   }
 
-  Future printOrientiation(img.Image image) async {
-    final exif = await readExifFromBytes(image.buffer.asInt8List());
-    final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
-    printLog(orientation);
-  }
-
-  // img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
-  //   final plane = cameraImage.planes[0];
-  //   var iosBytesOffset = 28;
-  //   return img.Image.fromBytes(
-  //     width: cameraImage.width,
-  //     height: cameraImage.height,
-  //     bytes: plane.bytes.buffer,
-  //     rowStride: plane.bytesPerRow,
-  //     // bytesOffset: iosBytesOffset,
-  //     order: img.ChannelOrder.bgra,
-  //   );
-  // }
-
   img.Image _convertNV21(CameraImage image) {
     final width = image.width.toInt();
     final height = image.height.toInt();
@@ -339,6 +320,25 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     }
     return outImg;
   }
+
+  Future printOrientiation(img.Image image) async {
+    final exif = await readExifFromBytes(image.buffer.asInt8List());
+    final orientation = exif['Image Orientation']?.values.firstAsInt() ?? 1;
+    printLog(orientation);
+  }
+
+  // img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
+  //   final plane = cameraImage.planes[0];
+  //   var iosBytesOffset = 28;
+  //   return img.Image.fromBytes(
+  //     width: cameraImage.width,
+  //     height: cameraImage.height,
+  //     bytes: plane.bytes.buffer,
+  //     rowStride: plane.bytesPerRow,
+  //     // bytesOffset: iosBytesOffset,
+  //     order: img.ChannelOrder.bgra,
+  //   );
+  // }
 
   Future<List<double>?> getEmbedFromFile(File file) async {
     try {
@@ -795,7 +795,7 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
                         }
                         final bytes = img.encodeJpg(value);
                         return Image.memory(
-                          bytes!,
+                          bytes,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
                             return SizedBox.shrink();
@@ -830,6 +830,13 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ].contains(_getApplicableOrientation());
+  }
+  DeviceOrientation _getApplicableOrientation() {
+    return cameraController!.value.isRecordingVideo
+        ? cameraController!.value.recordingOrientation!
+        : (cameraController!.value.previewPauseOrientation ??
+              cameraController!.value.lockedCaptureOrientation ??
+              cameraController!.value.deviceOrientation);
   }
 
   Future<File?> processPickedImage(XFile pickedFile) async {
@@ -920,11 +927,5 @@ class _FaceRecognitionScreenState extends State<FaceRecognitionScreen> {
     }
   }
 
-  DeviceOrientation _getApplicableOrientation() {
-    return cameraController!.value.isRecordingVideo
-        ? cameraController!.value.recordingOrientation!
-        : (cameraController!.value.previewPauseOrientation ??
-              cameraController!.value.lockedCaptureOrientation ??
-              cameraController!.value.deviceOrientation);
-  }
+  
 }
