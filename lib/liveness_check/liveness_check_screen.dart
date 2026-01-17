@@ -1,5 +1,6 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'package:camera/camera.dart';
+import 'package:face_recognition/liveness_check/liveness_checker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:face_recognition/permission_checker.dart';
@@ -21,6 +22,7 @@ class LivenessCheckScreen extends StatefulWidget {
 class _LivenessCheckScreenState extends State<LivenessCheckScreen>
     with WidgetsBindingObserver {
   CameraController? _cameraController;
+  final livenessChecker = DefaultLivenessChecker();
   @override
   void initState() {
     super.initState();
@@ -48,6 +50,7 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
       });
       _cameraController = CameraController(cameraDesc, widget.resolutionPreset);
       await _cameraController!.initialize();
+      _cameraController!.startImageStream(livenessChecker.onImageStream);
       setState(() {});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
