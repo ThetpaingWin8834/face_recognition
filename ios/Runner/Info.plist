@@ -46,8 +46,9 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-<string>your usage description here</string>
+<string>We need camera access to capture your face.</string>
+
 <key>NSMicrophoneUsageDescription</key>
-<string>your usage description here</string>
+<string>We need microphone access to record audio.</string>
 </dict>
 </plist>
