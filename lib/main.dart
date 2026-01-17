@@ -1,4 +1,5 @@
 import 'package:face_recognition/face_liveness_screen.dart';
+import 'package:face_recognition/liveness_check/liveness_check_screen.dart';
 import 'package:face_recognition/recognition/face_recognition_screen.dart';
 import 'package:flutter/material.dart';
 
@@ -16,7 +17,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: FaceRecognitionScreen(),
+      home: LivenessCheckScreen(),
     );
   }
 }
