@@ -1,5 +1,10 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:io';
+import 'dart:math';
+
 import 'package:camera/camera.dart';
+import 'package:face_recognition/helpers.dart';
+import 'package:face_recognition/img_utils.dart';
 import 'package:face_recognition/liveness_check/liveness_checker.dart';
 import 'package:flutter/material.dart';
 
@@ -22,7 +27,7 @@ class LivenessCheckScreen extends StatefulWidget {
 class _LivenessCheckScreenState extends State<LivenessCheckScreen>
     with WidgetsBindingObserver {
   CameraController? _cameraController;
-  final livenessChecker = DefaultLivenessChecker();
+  late final livenessChecker = LivenessChecker(features: widget.features);
   @override
   void initState() {
     super.initState();
@@ -48,9 +53,15 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
       final cameraDesc = cameras.firstWhere((camera) {
         return camera.lensDirection == .front;
       });
-      _cameraController = CameraController(cameraDesc, widget.resolutionPreset);
+      _cameraController = CameraController(cameraDesc, widget.resolutionPreset,imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.nv21
+          : ImageFormatGroup.bgra8888);
       await _cameraController!.initialize();
-      _cameraController!.startImageStream(livenessChecker.onImageStream);
+      await livenessChecker.init(
+        sensorOrientation: cameraDesc.sensorOrientation,
+      );
+      await _cameraController!.startImageStream(livenessChecker.onImageStream);
+      
       setState(() {});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -89,7 +100,43 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
       child: Scaffold(
         body:
             _cameraController != null && _cameraController!.value.isInitialized
-            ? CameraPreview(_cameraController!)
+            ? Stack(
+                children: [
+                  CameraPreview(_cameraController!),
+                  Positioned(
+                    right: 36,
+                    top: 36,
+                    width: 150,
+                    height: 250,
+                    child: Transform.flip(
+                      flipX: true,
+                      child: Transform.rotate(
+                        angle: -pi / 2,
+                        child: Center(
+                          child: ValueListenableBuilder(
+                            valueListenable: livenessChecker.currentImageStream,
+                            builder: (context, value, child) {
+                              // printLog('bio');
+                              if (value != null) {
+                                
+                                return Image.memory(
+                                  value,
+                                  fit: .contain,
+                                  gaplessPlayback: true,
+                                  // ImgUtils.convertToBytes(
+                                  //   ImgUtils.convertCameraImageToImage(value!),
+                                  // ),
+                                );
+                              }
+                              return Container(color: Colors.amber,);
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              )
             : Center(child: CircularProgressIndicator()),
       ),
     );
