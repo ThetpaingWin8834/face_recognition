@@ -5,6 +5,7 @@ import 'package:camera/camera.dart' show CameraImage;
 import 'package:face_recognition/helpers.dart';
 import 'package:face_recognition/img_utils.dart';
 import 'package:face_recognition/liveness_check/liveness_check_screen.dart';
+import 'package:face_recognition/liveness_check/models/required_move.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
