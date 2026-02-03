@@ -3,21 +3,30 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'package:face_recognition/helpers.dart';
 import 'package:face_recognition/img_utils.dart';
 import 'package:face_recognition/liveness_check/liveness_checker.dart';
-import 'package:flutter/material.dart';
-
+import 'package:face_recognition/liveness_check/models/liveness_check_error.dart';
+import 'package:face_recognition/liveness_check/models/required_move.dart';
 import 'package:face_recognition/permission_checker.dart';
-import 'package:flutter/services.dart';
 
 class LivenessCheckScreen extends StatefulWidget {
   final List<RequiredMove> features;
   final ResolutionPreset resolutionPreset;
+  final Widget Function(CameraController controller)? previewBuilder;
+  final Widget Function(LivenessCheckError error)? errorBuilder;
+  final Widget Function()? loadingBuilder;
+
   const LivenessCheckScreen({
     Key? key,
     required this.features,
     this.resolutionPreset = .high,
+    this.previewBuilder,
+    this.errorBuilder,
+    this.loadingBuilder,
   }) : super(key: key);
 
   @override
@@ -27,7 +36,11 @@ class LivenessCheckScreen extends StatefulWidget {
 class _LivenessCheckScreenState extends State<LivenessCheckScreen>
     with WidgetsBindingObserver {
   CameraController? _cameraController;
+  AppLifecycleState _prevLifeCycleState = .resumed;
+  bool _didHandleNotresumeState = true;
   late final livenessChecker = LivenessChecker(features: widget.features);
+  bool _loading = true;
+  LivenessCheckError? _error;
   @override
   void initState() {
     super.initState();
@@ -49,21 +62,35 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
 
   void _initCameraController() async {
     try {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
       final cameras = await availableCameras();
       final cameraDesc = cameras.firstWhere((camera) {
         return camera.lensDirection == .front;
       });
-      _cameraController = CameraController(cameraDesc, widget.resolutionPreset,imageFormatGroup: Platform.isAndroid
-          ? ImageFormatGroup.nv21
-          : ImageFormatGroup.bgra8888);
+      _cameraController = CameraController(
+        cameraDesc,
+        widget.resolutionPreset,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
+      );
       await _cameraController!.initialize();
       await livenessChecker.init(
         sensorOrientation: cameraDesc.sensorOrientation,
       );
       await _cameraController!.startImageStream(livenessChecker.onImageStream);
-      
+
       setState(() {});
     } catch (e) {
+      setState(() {
+        _error = InitializedError(
+          message: 'Failed to initialize camera!',
+          rawError: e,
+        );
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.toString()),
@@ -76,83 +103,195 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
           ),
         ),
       );
+    } finally {
+      setState(() {
+        _loading = false;
+      });
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _cameraController;
-    // App state changed before we got the chance to initialize.
-    if (cameraController == null || !cameraController.value.isInitialized) {
+    if (state == .resumed) {
+      _prevLifeCycleState = .resumed;
+      _didHandleNotresumeState = false;
+      _onLifeCycleResumed();
+    } else if (!_didHandleNotresumeState) {
+      _didHandleNotresumeState = true;
+      _onLifeCycleNotResumed();
+    }
+    // if(state == .resumed){
+    //   if(_cameraController == null){
+    //     _initCameraController();
+    //   }else{
+    //     _cameraController!.resumePreview();
+    //   }
+    // }
+    // if(_cameraController == null){
+    //   return;
+    // }
+
+    // final CameraController? cameraController = _cameraController;
+    // // App state changed before we got the chance to initialize.
+    // if (cameraController == null || !cameraController.value.isInitialized) {
+    //   return;
+    // }
+
+    // if (state == AppLifecycleState.inactive) {
+    //   cameraController.dispose();
+    // } else if (state == AppLifecycleState.resumed) {
+    //   _initCameraController();
+    // }
+  }
+
+  void _onLifeCycleResumed() {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) {
+      _initCameraController();
       return;
     }
+    _cameraController!.resumePreview();
+    controller.startImageStream((image) {});
+  }
 
-    if (state == AppLifecycleState.inactive) {
-      cameraController.dispose();
-    } else if (state == AppLifecycleState.resumed) {
-      _initCameraController();
+  void _onLifeCycleNotResumed() {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
     }
+    controller.pausePreview();
+    controller.stopImageStream();
   }
 
   @override
   Widget build(BuildContext context) {
     return CameraPermissionChecker(
-      child: Scaffold(
-        body:
-            _cameraController != null && _cameraController!.value.isInitialized
-            ? Stack(
-                children: [
-                  CameraPreview(_cameraController!),
-                  Positioned(
-                    right: 36,
-                    top: 36,
-                    width: 150,
-                    height: 250,
-                    child: Transform.flip(
-                      flipX: true,
-                      child: Transform.rotate(
-                        angle: -pi / 2,
-                        child: Center(
-                          child: ValueListenableBuilder(
-                            valueListenable: livenessChecker.currentImageStream,
-                            builder: (context, value, child) {
-                              // printLog('bio');
-                              if (value != null) {
-                                
-                                return Image.memory(
-                                  value,
-                                  fit: .contain,
-                                  gaplessPlayback: true,
-                                  // ImgUtils.convertToBytes(
-                                  //   ImgUtils.convertCameraImageToImage(value!),
-                                  // ),
-                                );
-                              }
-                              return Container(color: Colors.amber,);
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : Center(child: CircularProgressIndicator()),
+      child: Builder(
+        builder: (context) {
+          if (_error != null) {
+            return widget.errorBuilder?.call(_error!) ??
+                _DefaultErrorView(error: _error!);
+          } else if (_loading) {
+            return widget.loadingBuilder?.call() ?? _DefaultLoadingView();
+          } else if (_cameraController != null) {
+            return Stack(
+              children: [
+                widget.previewBuilder?.call(_cameraController!) ??
+                    CameraPreview(_cameraController!),
+              ],
+            );
+          }
+          return SizedBox.shrink();
+        },
       ),
+
+      // child: Scaffold(
+      //   body:
+      //       _cameraController != null && _cameraController!.value.isInitialized
+      //       ? Stack(
+      //           children: [
+      //             CameraPreview(_cameraController!),
+      //             Positioned(
+      //               right: 36,
+      //               top: 36,
+      //               width: 150,
+      //               height: 250,
+      //               child: Transform.flip(
+      //                 flipX: true,
+      //                 child: Transform.rotate(
+      //                   angle: -pi / 2,
+      //                   child: Center(
+      //                     child: ValueListenableBuilder(
+      //                       valueListenable: livenessChecker.currentImageStream,
+      //                       builder: (context, value, child) {
+      //                         // printLog('bio');
+      //                         if (value != null) {
+      //                           return Image.memory(
+      //                             value,
+      //                             fit: .contain,
+      //                             gaplessPlayback: true,
+      //                             // ImgUtils.convertToBytes(
+      //                             //   ImgUtils.convertCameraImageToImage(value!),
+      //                             // ),
+      //                           );
+      //                         }
+      //                         return Container(color: Colors.amber);
+      //                       },
+      //                     ),
+      //                   ),
+      //                 ),
+      //               ),
+      //             ),
+      //           ],
+      //         )
+      //       : Center(child: CircularProgressIndicator()),
+      // ),
     );
   }
 }
+// class _DefaultFullScreenPreview extends StatelessWidget {
+//   final CameraController controller;
+//   const _DefaultFullScreenPreview({
+//     Key? key,
+//     required this.controller,
+//   }) : super(key: key);
 
-enum RequiredMove {
-  turnLeft,
-  turnRight,
-  eyeBlink;
+//   @override
+//   Widget build(BuildContext context) {
+//    return Stack(
+//                 children: [
+//                   CameraPreview(controller),
+//                   Positioned(
+//                     right: 36,
+//                     top: 36,
+//                     width: 150,
+//                     height: 250,
+//                     child: Transform.flip(
+//                       flipX: true,
+//                       child: Transform.rotate(
+//                         angle: -pi / 2,
+//                         child: Center(
+//                           child: ValueListenableBuilder(
+//                             valueListenable: livenessChecker.currentImageStream,
+//                             builder: (context, value, child) {
+//                               // printLog('bio');
+//                               if (value != null) {
+//                                 return Image.memory(
+//                                   value,
+//                                   fit: .contain,
+//                                   gaplessPlayback: true,
+//                                   // ImgUtils.convertToBytes(
+//                                   //   ImgUtils.convertCameraImageToImage(value!),
+//                                   // ),
+//                                 );
+//                               }
+//                               return Container(color: Colors.amber);
+//                             },
+//                           ),
+//                         ),
+//                       ),
+//                     ),
+//                   ),
+//                 ],
+//               )
+//   }
+// }
 
-  String displayMessage() {
-    return switch (this) {
-      RequiredMove.turnLeft => 'Turn Your Face To LEFT',
-      RequiredMove.turnRight => 'Turn Your Face To RIGHT',
-      RequiredMove.eyeBlink => 'Blink Your EYES',
-    };
+class _DefaultLoadingView extends StatelessWidget {
+  const _DefaultLoadingView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(child: CircularProgressIndicator());
+  }
+}
+
+class _DefaultErrorView extends StatelessWidget {
+  final LivenessCheckError error;
+  const _DefaultErrorView({Key? key, required this.error}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(child: Text(error.toString()));
   }
 }
