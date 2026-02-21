@@ -72,6 +72,7 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
         _error = null;
       });
       final cameras = await availableCameras();
+      printLog(cameras);
       final cameraDesc = cameras.firstWhere((camera) {
         return camera.lensDirection == .front;
       });
@@ -90,6 +91,7 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
 
       setState(() {});
     } catch (e) {
+      printLog(e);
       _onError(
         InitializedError(message: 'Failed to initialize camera!', rawError: e),
       );
@@ -101,8 +103,9 @@ class _LivenessCheckScreenState extends State<LivenessCheckScreen>
   }
 
   void _onError(LivenessCheckError error) async {
-    if (error is InitializedError || _maxRetryCount > 0) {
+    if (error is InitializedError && _maxRetryCount > 0) {
       _maxRetryCount = --_maxRetryCount;
+        printLog(_maxRetryCount);
         printLog(error.toString());
 
       await _initCameraController();

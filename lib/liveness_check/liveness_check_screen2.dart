@@ -52,7 +52,7 @@ class _LivenessCheckScreen2State extends State<LivenessCheckScreen2>
     try {
       final cameras = await availableCameras();
       final cameraDesc = cameras.firstWhere((camera) {
-        return camera.lensDirection == .front;
+        return camera.lensDirection == .back;
       });
       _cameraController = CameraController(cameraDesc, widget.resolutionPreset,imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21

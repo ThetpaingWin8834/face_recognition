@@ -19,7 +19,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: LivenessCheckScreen(features: RequiredMove.values),
+      home: LivenessCheckScreen2(features: RequiredMove.values),
     );
   }
 }
